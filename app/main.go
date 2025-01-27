@@ -25,14 +25,31 @@ type question struct {
 	class uint16
 }
 
-func makeLabel(domain string) []byte {
-	var label []byte
+type answer struct {
+	name   []byte
+	atype  uint16
+	class  uint16
+	ttl    uint32
+	length uint16
+	data   []byte
+}
+
+func encodeDomain(domain string) []byte {
+	var encodedDomain []byte
 	for _, part := range strings.Split(domain, ".") {
-		label = append(label, byte(len(part)))
-		label = append(label, []byte(part)...)
+		encodedDomain = append(encodedDomain, byte(len(part)))
+		encodedDomain = append(encodedDomain, []byte(part)...)
 	}
-	label = append(label, 0)
-	return label
+	encodedDomain = append(encodedDomain, 0)
+	return encodedDomain
+}
+
+func encodeIP(ip string) []byte {
+	var encodedIp []byte
+	for _, part := range strings.Split(ip, ".") {
+		encodedIp = append(encodedIp, []byte(part)...)
+	}
+	return encodedIp
 }
 
 func main() {
@@ -65,20 +82,35 @@ func main() {
 			id:      1234,
 			flags:   0x8000,
 			qdcount: 1,
-			ancount: 0,
+			ancount: 1,
 			nscount: 0,
 			arcount: 0,
 		}
 		q := question{
-			name:  makeLabel("codecrafters.io"),
+			name:  encodeDomain("codecrafters.io"),
 			qtype: 1,
 			class: 1,
 		}
+		a := answer{
+			name:   encodeDomain("codecrafters.io"),
+			atype:  1,
+			class:  1,
+			ttl:    60,
+			length: 4,
+			data:   encodeIP("8.8.8.8"),
+		}
+
 		buf := new(bytes.Buffer)
 		binary.Write(buf, binary.BigEndian, h)
 		binary.Write(buf, binary.BigEndian, q.name)
 		binary.Write(buf, binary.BigEndian, q.qtype)
 		binary.Write(buf, binary.BigEndian, q.class)
+		binary.Write(buf, binary.BigEndian, a.name)
+		binary.Write(buf, binary.BigEndian, a.atype)
+		binary.Write(buf, binary.BigEndian, a.class)
+		binary.Write(buf, binary.BigEndian, a.ttl)
+		binary.Write(buf, binary.BigEndian, a.length)
+		binary.Write(buf, binary.BigEndian, a.data)
 		response := buf.Bytes()
 
 		_, err = udpConn.WriteToUDP(response, source)
