@@ -1,58 +1,38 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"net"
+	"strings"
 )
 
 var _ = net.ListenUDP
 
-type resultCode int
-
-const (
-	noError resultCode = iota
-	formErr
-	servFail
-	nxDomain
-	notImp
-	refused
-)
-
-type dnsHeader struct {
-	id uint16 // 16 bits
-
-	recursionDesired    uint8 // 1 bit
-	truncatedMessage    uint8 // 1 bit
-	authoritativeAnswer uint8 // 1 bit
-	opcode              uint8 // 4 bits
-	response            uint8 // 1 bit
-
-	rescode            resultCode
-	checkingDisabled   uint8
-	authedData         uint8
-	z                  uint8
-	recursionAvailable uint8
-
-	questions            uint16
-	answers              uint16
-	authoritativeEntries uint16
-	resourceEntries      uint16
+type header struct {
+	id      uint16
+	flags   uint16
+	qdcount uint16
+	ancount uint16
+	nscount uint16
+	arcount uint16
 }
 
-func newHeader() *dnsHeader {
-	h := dnsHeader{
-		id:       1234,
-		response: 1,
+type question struct {
+	name  []byte
+	qtype uint16
+	class uint16
+}
+
+func makeLabel(domain string) []byte {
+	var label []byte
+	for _, part := range strings.Split(domain, ".") {
+		label = append(label, byte(len(part)))
+		label = append(label, []byte(part)...)
 	}
-	return &h
-}
-
-func (h *dnsHeader) toBytes() []byte {
-	headerBytes := make([]byte, 12)
-	binary.BigEndian.PutUint16(headerBytes[0:2], h.id) // 2 bytes = 16 bits
-	headerBytes[2] = h.response << 7                   // shift 7 times to left = 0b10000000 = decimal 128
-	return headerBytes
+	label = append(label, 0)
+	return label
 }
 
 func main() {
@@ -81,13 +61,25 @@ func main() {
 		receivedData := string(buf[:size])
 		fmt.Printf("Received %d bytes from %s: %s\n", size, source, receivedData)
 
-		// response := make([]byte, 12)
-		response := newHeader().toBytes()
-
-		// header := newHeader()
-		// copy(response, buf[:12])
-		fmt.Println("header", newHeader())
-		fmt.Println("res", response)
+		h := header{
+			id:      1234,
+			flags:   0x8000,
+			qdcount: 1,
+			ancount: 0,
+			nscount: 0,
+			arcount: 0,
+		}
+		q := question{
+			name:  makeLabel("codecrafters.io"),
+			qtype: 1,
+			class: 1,
+		}
+		buf := new(bytes.Buffer)
+		binary.Write(buf, binary.BigEndian, h)
+		binary.Write(buf, binary.BigEndian, q.name)
+		binary.Write(buf, binary.BigEndian, q.qtype)
+		binary.Write(buf, binary.BigEndian, q.class)
+		response := buf.Bytes()
 
 		_, err = udpConn.WriteToUDP(response, source)
 		if err != nil {
