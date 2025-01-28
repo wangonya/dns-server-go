@@ -70,14 +70,12 @@ func parseQuestion(buf []byte, numQuestions uint16) []question {
 	i := 0
 	q := question{}
 	for _, v := range buf[offset:] {
-		fmt.Println("offset ->", offset)
 		q.Name = append(q.Name, v)
 		if int(v) == 0 {
 			q.QType = 1
 			q.Class = 1
 			questions = append(questions, q)
 			i++
-			fmt.Println(string(q.Name))
 			offset += 4 + 1 // 2 bytes for type, 2 bytes for class, next
 			q = question{}
 		}
@@ -139,7 +137,6 @@ func main() {
 
 		responseBuf := new(bytes.Buffer)
 		binary.Write(responseBuf, binary.BigEndian, h)
-		fmt.Println("id ->", h.ID)
 
 		for _, q := range questions {
 			binary.Write(responseBuf, binary.BigEndian, q.Name)
