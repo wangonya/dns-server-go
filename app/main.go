@@ -8,15 +8,13 @@ import (
 	"strings"
 )
 
-var _ = net.ListenUDP
-
 type header struct {
-	id      uint16
-	flags   uint16
-	qdcount uint16
-	ancount uint16
-	nscount uint16
-	arcount uint16
+	ID      uint16
+	Flags   uint16
+	QDCount uint16
+	ANCount uint16
+	NSCount uint16
+	ARCount uint16
 }
 
 type question struct {
@@ -52,6 +50,28 @@ func encodeIP(ip string) []byte {
 	return encodedIp
 }
 
+func parseHeader(buf []byte) (header, error) {
+	h := header{}
+	reader := bytes.NewReader(buf)
+	err := binary.Read(reader, binary.BigEndian, &h)
+
+	if err != nil {
+		return h, err
+	}
+
+	flags := h.Flags & (0b01111001 << 8)
+	flags |= 1 << 15
+
+	if h.Flags&(0b01111<<11) != 0 {
+		fmt.Println("Not a query, ignoring")
+		// set response code to 4
+		flags |= 4
+	}
+
+	h.Flags = flags
+	return h, nil
+}
+
 func main() {
 	udpAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:2053")
 	if err != nil {
@@ -78,13 +98,18 @@ func main() {
 		receivedData := string(buf[:size])
 		fmt.Printf("Received %d bytes from %s: %s\n", size, source, receivedData)
 
-		h := header{
-			id:      1234,
-			flags:   0x8000,
-			qdcount: 1,
-			ancount: 1,
-			nscount: 0,
-			arcount: 0,
+		requestHeader, err := parseHeader(buf)
+		if err != nil {
+			fmt.Println("Failed to parse header:", err)
+			break
+		}
+		responseHeader := header{
+			ID:      requestHeader.ID,
+			Flags:   requestHeader.Flags,
+			QDCount: 1,
+			ANCount: 1,
+			NSCount: 0,
+			ARCount: 0,
 		}
 		q := question{
 			name:  encodeDomain("codecrafters.io"),
@@ -101,7 +126,7 @@ func main() {
 		}
 
 		buf := new(bytes.Buffer)
-		binary.Write(buf, binary.BigEndian, h)
+		binary.Write(buf, binary.BigEndian, responseHeader)
 		binary.Write(buf, binary.BigEndian, q.name)
 		binary.Write(buf, binary.BigEndian, q.qtype)
 		binary.Write(buf, binary.BigEndian, q.class)
