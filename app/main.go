@@ -18,18 +18,18 @@ type header struct {
 }
 
 type question struct {
-	name  []byte
-	qtype uint16
-	class uint16
+	Name  []byte
+	QType uint16
+	Class uint16
 }
 
 type answer struct {
-	name   []byte
-	atype  uint16
-	class  uint16
-	ttl    uint32
-	length uint16
-	data   []byte
+	Name   []byte
+	AType  uint16
+	Class  uint16
+	TTL    uint32
+	Length uint16
+	Data   []byte
 }
 
 func encodeDomain(domain string) []byte {
@@ -54,7 +54,6 @@ func parseHeader(buf []byte) (header, error) {
 	h := header{}
 	reader := bytes.NewReader(buf)
 	err := binary.Read(reader, binary.BigEndian, &h)
-
 	if err != nil {
 		return h, err
 	}
@@ -69,7 +68,44 @@ func parseHeader(buf []byte) (header, error) {
 	}
 
 	h.Flags = flags
+	h.QDCount = 1
+	h.ANCount = 1
+	h.NSCount = 0
+	h.ARCount = 0
 	return h, nil
+}
+
+func parseQuestion(buf []byte) question {
+	q := question{}
+
+	for _, v := range buf[12:] {
+		q.Name = append(q.Name, v)
+		if int(v) == 0 {
+			break
+		}
+	}
+
+	q.QType = 1
+	q.Class = 1
+	return q
+}
+
+func parseAnswer(buf []byte) answer {
+	a := answer{}
+
+	for _, v := range buf[12:] {
+		a.Name = append(a.Name, v)
+		if int(v) == 0 {
+			break
+		}
+	}
+
+	a.AType = 1
+	a.Class = 1
+	a.TTL = 60
+	a.Length = 4
+	a.Data = encodeIP("8.8.8.8")
+	return a
 }
 
 func main() {
@@ -98,44 +134,26 @@ func main() {
 		receivedData := string(buf[:size])
 		fmt.Printf("Received %d bytes from %s: %s\n", size, source, receivedData)
 
-		requestHeader, err := parseHeader(buf)
+		h, err := parseHeader(buf)
 		if err != nil {
 			fmt.Println("Failed to parse header:", err)
 			break
 		}
-		responseHeader := header{
-			ID:      requestHeader.ID,
-			Flags:   requestHeader.Flags,
-			QDCount: 1,
-			ANCount: 1,
-			NSCount: 0,
-			ARCount: 0,
-		}
-		q := question{
-			name:  encodeDomain("codecrafters.io"),
-			qtype: 1,
-			class: 1,
-		}
-		a := answer{
-			name:   encodeDomain("codecrafters.io"),
-			atype:  1,
-			class:  1,
-			ttl:    60,
-			length: 4,
-			data:   encodeIP("8.8.8.8"),
-		}
+
+		q := parseQuestion(buf)
+		a := parseAnswer(buf)
 
 		buf := new(bytes.Buffer)
-		binary.Write(buf, binary.BigEndian, responseHeader)
-		binary.Write(buf, binary.BigEndian, q.name)
-		binary.Write(buf, binary.BigEndian, q.qtype)
-		binary.Write(buf, binary.BigEndian, q.class)
-		binary.Write(buf, binary.BigEndian, a.name)
-		binary.Write(buf, binary.BigEndian, a.atype)
-		binary.Write(buf, binary.BigEndian, a.class)
-		binary.Write(buf, binary.BigEndian, a.ttl)
-		binary.Write(buf, binary.BigEndian, a.length)
-		binary.Write(buf, binary.BigEndian, a.data)
+		binary.Write(buf, binary.BigEndian, h)
+		binary.Write(buf, binary.BigEndian, q.Name)
+		binary.Write(buf, binary.BigEndian, q.QType)
+		binary.Write(buf, binary.BigEndian, q.Class)
+		binary.Write(buf, binary.BigEndian, a.Name)
+		binary.Write(buf, binary.BigEndian, a.AType)
+		binary.Write(buf, binary.BigEndian, a.Class)
+		binary.Write(buf, binary.BigEndian, a.TTL)
+		binary.Write(buf, binary.BigEndian, a.Length)
+		binary.Write(buf, binary.BigEndian, a.Data)
 		response := buf.Bytes()
 
 		_, err = udpConn.WriteToUDP(response, source)
