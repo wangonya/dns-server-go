@@ -3,9 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"flag"
 	"fmt"
 	"net"
-	"strings"
 )
 
 type header struct {
@@ -30,14 +30,6 @@ type answer struct {
 	TTL    uint32
 	Length uint16
 	Data   []byte
-}
-
-func encodeIP(ip string) []byte {
-	var encodedIp []byte
-	for _, part := range strings.Split(ip, ".") {
-		encodedIp = append(encodedIp, []byte(part)...)
-	}
-	return encodedIp
 }
 
 func parseHeader(buf []byte) (header, error) {
@@ -86,19 +78,20 @@ func parseQuestion(buf []byte, numQuestions uint16) []question {
 	return questions
 }
 
-func parseAnswer(questions []question) []answer {
-	answers := []answer{}
-	for _, question := range questions {
-		answers = append(answers, answer{
-			Name:   question.Name,
-			AType:  1,
-			Class:  1,
-			TTL:    0,
-			Length: 4,
-			Data:   encodeIP("8.8.8.8"),
-		})
+func parseAnswer(buf []byte) answer {
+	answer := answer{}
+	for i, v := range buf {
+		answer.Name = append(answer.Name, v)
+		if int(v) == 0 {
+			answer.AType = binary.BigEndian.Uint16(buf[i+1 : i+3])
+			answer.Class = binary.BigEndian.Uint16(buf[i+3 : i+5])
+			answer.TTL = binary.BigEndian.Uint32(buf[i+5 : i+9])
+			answer.Length = binary.BigEndian.Uint16(buf[i+9 : i+11])
+			answer.Data = buf[i+11:]
+			break
+		}
 	}
-	return answers
+	return answer
 }
 
 func main() {
@@ -114,6 +107,18 @@ func main() {
 		return
 	}
 	defer udpConn.Close()
+
+	forwardAddress := flag.String("resolver", "", "address to forward questions")
+	flag.Parse()
+
+	var forwardAddr *net.UDPAddr
+	if forwardAddress != nil {
+		forwardAddr, err = net.ResolveUDPAddr("udp", *forwardAddress)
+		if err != nil {
+			fmt.Println("Failed to resolve forward UDP address:", err)
+			return
+		}
+	}
 
 	requestBuf := make([]byte, 512)
 
@@ -144,7 +149,29 @@ func main() {
 			binary.Write(responseBuf, binary.BigEndian, q.Class)
 		}
 
-		for _, a := range parseAnswer(questions) {
+		for _, q := range questions {
+			forwardBuf := make([]byte, 512)
+			qBuf := new(bytes.Buffer)
+			binary.Write(qBuf, binary.BigEndian, q.Name)
+			binary.Write(qBuf, binary.BigEndian, q.QType)
+			binary.Write(qBuf, binary.BigEndian, q.Class)
+
+			dataWithSingleQuestion := []byte{}
+			dataWithSingleQuestion = append(dataWithSingleQuestion, requestBuf[:12]...) // request header
+			dataWithSingleQuestion = append(dataWithSingleQuestion, qBuf.Bytes()...)
+			_, err = udpConn.WriteToUDP(dataWithSingleQuestion, forwardAddr)
+			if err != nil {
+				fmt.Println("Failed to forward request:", err)
+				return
+			}
+
+			_, _, err := udpConn.ReadFromUDP(forwardBuf)
+			if err != nil {
+				fmt.Println("Error receiving data from foward:", err)
+				return
+			}
+
+			a := parseAnswer(forwardBuf[12+len(qBuf.Bytes()):])
 			binary.Write(responseBuf, binary.BigEndian, a.Name)
 			binary.Write(responseBuf, binary.BigEndian, a.AType)
 			binary.Write(responseBuf, binary.BigEndian, a.Class)
